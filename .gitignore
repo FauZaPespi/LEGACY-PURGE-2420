@@ -1,0 +1,40 @@
+# Build output
+x64/
+Debug/
+Release/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.db
+*.opendb
+
+# Intermediate files
+*.obj
+*.pdb
+*.ilk
+*.log
+*.tlog
+*.idb
+*.ipch
+*.pch
+*.exe
+*.dll
+*.lib
+*.exp
+*.recipe
+
+# NuGet packages (restore with VS)
+packages/
+
+# macOS
+.DS_Store
+
+# Claude
+.claude/
+
+# Intermediate build directories
+LEGACY\ P.*/
