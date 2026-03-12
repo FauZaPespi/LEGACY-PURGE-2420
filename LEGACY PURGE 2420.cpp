@@ -40,7 +40,7 @@ private:
 	std::vector<Wall> walls;
 	bool isShowingHitbox = false;
 	const float cellSize = 3.0f;
-	const int mazeSize = 21; // Must be odd for the algorithm
+	const int mazeSize = 67; // Must be odd for the algorithm
 
 	BoundingBox GetPlayerBox(Vector3 pos) {
 		return {
@@ -92,7 +92,7 @@ private:
 		}
 
 		// Convert grid to walls
-		float offset = -(mazeSize * cellSize) / 2.0f + cellSize / 2.0f;
+		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
 
 		for (int i = 0; i < mazeSize; i++) {
 			for (int j = 0; j < mazeSize; j++) {
