@@ -1,0 +1,1 @@
+This folder is for game assets. Please put php.png here.

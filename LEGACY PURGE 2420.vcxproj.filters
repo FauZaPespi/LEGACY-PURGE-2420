@@ -18,8 +18,27 @@
     <ClCompile Include="LEGACY PURGE 2420.cpp">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
+    <ClCompile Include="Utils\Converter.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Converter.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="assets\README.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="C:\Users\oscar_clv\Downloads\php.png">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
+    <Image Include="assets\php.png">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
   </ItemGroup>
 </Project>

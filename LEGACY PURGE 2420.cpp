@@ -5,14 +5,26 @@
 #include <utility>
 #include "raylib.h"
 #include "raymath.h"
+#include "Entities/PHPEmployee.h"
+
+enum GameState { PLAYING, DEATH_SCREEN };
 
 class LegacyPurgeCore {
 private:
+	// --- Engine & State ---
+	GameState currentState = PLAYING;
+	float hurtTimer = 0.0f;
+	float damageCooldown = 0.0f; // Global damage cooldown
+
 	// --- Gameplay Variables ---
 	int fps_objective = 144;
 	int health = 100;
 	int screenWidth = 1280;
 	int screenHeight = 720;
+
+	// --- Entities ---
+	Texture2D phpTexture;
+	std::vector<PHPEmployee*> enemies;
 
 	// --- Physics & Movement ---
 	Vector3 playerPos = { 0.0f, 1.0f, 0.0f };
@@ -111,6 +123,27 @@ private:
 		playerPos = { offset + 1 * cellSize, 1.0f, offset + 1 * cellSize };
 	}
 
+	void Restart() {
+		health = 100;
+		currentState = PLAYING;
+		GenerateLabyrinth();
+		// Re-spawn enemies
+		for (auto e : enemies) delete e;
+		enemies.clear();
+		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
+		int enemyCount = (mazeSize * mazeSize) / 40;
+		for (int i = 0; i < enemyCount; i++) {
+			Vector3 pos = {
+				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize,
+				1.5f,
+				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize
+			};
+			enemies.push_back(new PHPEmployee(pos, phpTexture, 2.0f));
+		}
+		EnableCursor();
+		DisableCursor();
+	}
+
 public:
 	void Run() {
 		// Initialization
@@ -131,16 +164,87 @@ public:
 		// Generate labyrinth
 		GenerateLabyrinth();
 
+		// Load PHP Texture
+		phpTexture = LoadTexture("assets/php.png");
+		if (phpTexture.id == 0) {
+			// Fallback: Create a simple purple texture if file not found
+			Image image = GenImageChecked(64, 64, 32, 32, PURPLE, BLACK);
+			phpTexture = LoadTextureFromImage(image);
+			UnloadImage(image);
+		}
+
+		// Initial Spawn
+		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
+		int enemyCount = (mazeSize * mazeSize) / 40;
+		for (int i = 0; i < enemyCount; i++) {
+			Vector3 pos = {
+				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize,
+				1.5f,
+				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize
+			};
+			enemies.push_back(new PHPEmployee(pos, phpTexture, 2.0f));
+		}
+
 		while (!WindowShouldClose()) {
 			Update();
 			Draw();
 		}
+
+		// Cleanup
+		UnloadTexture(phpTexture);
+		for (auto e : enemies) delete e;
+		enemies.clear();
 
 		CloseWindow();
 	}
 
 	void Update() {
 		float dt = GetFrameTime();
+
+		if (currentState == DEATH_SCREEN) {
+			EnableCursor();
+			if (IsKeyPressed(KEY_R)) {
+				Restart();
+				currentState = PLAYING;
+				DisableCursor();
+			}
+			return;
+		}
+
+		if (hurtTimer > 0) hurtTimer -= dt;
+		if (damageCooldown > 0) damageCooldown -= dt;
+
+		// Update Enemies
+		BoundingBox playerBox = GetPlayerBox(playerPos);
+		for (size_t i = 0; i < enemies.size(); i++) {
+			PHPEmployee* e = enemies[i];
+			e->Update(dt, playerPos);
+			
+			// PHP vs PHP collision
+			for (size_t j = i + 1; j < enemies.size(); j++) {
+				e->HandleEntityCollision(enemies[j]);
+			}
+
+			// Wall Collision for enemies
+			for (const auto& w : walls) {
+				// Optimization: only check walls within a certain distance
+				if (Vector3Distance(e->GetPosition(), w.pos) < cellSize * 2.0f) {
+					e->HandleWallCollision(w.pos, cellSize, w.height);
+				}
+			}
+
+			// Enemy-Player Collision with cooldown
+			if (damageCooldown <= 0 && CheckCollisionBoxes(e->GetBoundingBox(), playerBox)) {
+				health -= 10;
+				hurtTimer = 0.25f; // 250ms red flash
+				damageCooldown = 1.0f; // 1 second cooldown
+				e->SetAttacking();
+				if (health <= 0) {
+					health = 0;
+					currentState = DEATH_SCREEN;
+				}
+			}
+		}
 
 		// 1. Toggle UI/Fullscreen
 		if (IsKeyPressed(KEY_F10)) isShowingHitbox = !isShowingHitbox;
@@ -233,7 +337,7 @@ public:
 		}
 
 		// Wall Collision (Vertical - Landing on top or hitting from below)
-		BoundingBox playerBox = GetPlayerBox(playerPos);
+		playerBox = GetPlayerBox(playerPos);
 		for (const auto& w : walls) {
 			BoundingBox colBox = {
 				{ w.pos.x - cellSize / 2.0f, 0.0f, w.pos.z - cellSize / 2.0f },
@@ -272,12 +376,34 @@ public:
 			DrawCubeWires(w.pos, cellSize, w.height, cellSize, Fade(BLACK, 0.3f));
 		}
 
+		// Draw Enemies
+		for (auto e : enemies) e->Draw(camera, isShowingHitbox);
+
 		if (isShowingHitbox) {
 			DrawCubeWires(playerPos, playerSize.x, playerSize.y, playerSize.z, DARKPURPLE);
 		}
 		EndMode3D();
 
-		// UI - Player Stats
+		// Hurt cam flash
+		if (hurtTimer > 0) {
+			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(RED, 0.25f));
+		}
+
+		if (currentState == DEATH_SCREEN) {
+			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.8f));
+			
+			const char* deathText = "YOU HAVE BEEN PURGED";
+			int fontSize = 60;
+			int textWidth = MeasureText(deathText, fontSize);
+			DrawText(deathText, GetScreenWidth() / 2 - textWidth / 2, GetScreenHeight() / 2 - 100, fontSize, RED);
+
+			const char* subText = "Press 'R' to Restart Legacy";
+			int subFontSize = 20;
+			int subTextWidth = MeasureText(subText, subFontSize);
+			DrawText(subText, GetScreenWidth() / 2 - subTextWidth / 2, GetScreenHeight() / 2 + 20, subFontSize, RAYWHITE);
+		}
+		else {
+			// UI - Player Stats
 		DrawRectangle(10, GetScreenHeight() - 110, 200, 100, Fade(SKYBLUE, 0.5f));
 		DrawRectangleLines(10, GetScreenHeight() - 110, 200, 100, BLUE);
 		DrawText("PLAYER STATUS", 20, GetScreenHeight() - 100, 10, DARKGRAY);
@@ -289,6 +415,7 @@ public:
 		DrawText("WASD to Move", 20, 20, 10, BLACK);
 		DrawText("SPACE to Jump", 20, 35, 10, BLACK);
 		DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 50, 10, BLACK);
+		}
 
 		EndDrawing();
 	}

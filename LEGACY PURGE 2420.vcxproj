@@ -133,6 +133,13 @@
   <ItemGroup>
     <ClInclude Include="Converter.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="assets\README.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="assets\php.png" />
+    <Image Include="C:\Users\oscar_clv\Downloads\php.png" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="packages\raylib.5.5.0\build\native\raylib.targets" Condition="Exists('packages\raylib.5.5.0\build\native\raylib.targets')" />
