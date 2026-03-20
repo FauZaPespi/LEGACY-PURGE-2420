@@ -16,10 +16,21 @@ private:
     float speed = 4.0f;
     float gravity = -22.0f;
     float friction = 0.9f;
+    float health = 100.0f;
 
 public:
-    PHPEmployee(Vector3 pos, Texture2D tex, float scale = 2.0f) 
+    PHPEmployee(Vector3 pos, Texture2D tex, float scale = 2.0f)
         : Entity(pos, { scale * 0.5f, scale, scale * 0.5f }), texture(tex), billboardScale(scale) {}
+
+    void TakeDamage(float damage) {
+        health -= damage;
+        if (health <= 0) {
+            health = 0;
+            active = false;
+        }
+    }
+
+    float GetHealth() const { return health; }
 
     void SetAttacking() {
         state = ATTACK_RETREAT;
@@ -109,7 +120,7 @@ public:
     void Draw(Camera camera, bool showHitbox) override {
         if (!active) return;
         DrawBillboard(camera, texture, position, billboardScale, WHITE);
-        
+
         if (showHitbox) {
             DrawCubeWires(position, size.x, size.y, size.z, RED);
         }

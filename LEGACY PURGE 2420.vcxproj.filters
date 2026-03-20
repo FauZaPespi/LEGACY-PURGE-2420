@@ -40,5 +40,14 @@
     <Image Include="assets\php.png">
       <Filter>Fichiers de ressources</Filter>
     </Image>
+    <Image Include="assets\gun_shooting.png">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
+    <Image Include="C:\Users\oscar_clv\Downloads\gun_still.png">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
+    <Image Include="assets\gun_still.png">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
   </ItemGroup>
 </Project>

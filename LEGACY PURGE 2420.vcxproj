@@ -137,7 +137,10 @@
     <Text Include="assets\README.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Image Include="assets\gun_shooting.png" />
+    <Image Include="assets\gun_still.png" />
     <Image Include="assets\php.png" />
+    <Image Include="C:\Users\oscar_clv\Downloads\gun_still.png" />
     <Image Include="C:\Users\oscar_clv\Downloads\php.png" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

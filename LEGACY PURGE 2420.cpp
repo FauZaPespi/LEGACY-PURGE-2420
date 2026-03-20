@@ -6,6 +6,7 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "Entities/PHPEmployee.h"
+#include "Entities/Bullet.h"
 
 enum GameState { PLAYING, DEATH_SCREEN };
 
@@ -42,6 +43,21 @@ private:
 	float yaw = 0.0f;
 	float pitch = 0.0f;
 	float mouseSensitivity = 0.003f;
+
+	// --- Gun System ---
+	Texture2D gunTextureStill;
+	Texture2D gunTextureShooting;
+	bool isShooting = false;
+	float shootCooldown = 0.0f;
+	float shootCooldownMax = 0.3f;
+	float reloadTimer = 0.0f;
+	float reloadTimeMax = 2.0f;
+	bool isReloading = false;
+	int ammo = 12;
+	int maxAmmo = 12;
+	float shootAnimTimer = 0.0f;
+	std::vector<Bullet> bulletList;
+	float bulletSpeed = 50.0f;
 
 	// --- Environment ---
 	struct Wall {
@@ -173,6 +189,18 @@ public:
 			UnloadImage(image);
 		}
 
+		// Load Gun Textures
+		gunTextureStill = LoadTexture("assets/gun_still.png");
+		if (gunTextureStill.id == 0) {
+			Image gunImg = GenImageChecked(128, 128, 32, 32, GRAY, DARKGRAY);
+			gunTextureStill = LoadTextureFromImage(gunImg);
+			UnloadImage(gunImg);
+		}
+		gunTextureShooting = LoadTexture("assets/gun_shooting.png");
+		if (gunTextureShooting.id == 0) {
+			gunTextureShooting = gunTextureStill; // Fallback to still texture
+		}
+
 		// Initial Spawn
 		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
 		int enemyCount = (mazeSize * mazeSize) / 40;
@@ -192,6 +220,10 @@ public:
 
 		// Cleanup
 		UnloadTexture(phpTexture);
+		UnloadTexture(gunTextureStill);
+		if (gunTextureShooting.id != gunTextureStill.id) {
+			UnloadTexture(gunTextureShooting);
+		}
 		for (auto e : enemies) delete e;
 		enemies.clear();
 
@@ -214,6 +246,70 @@ public:
 		if (hurtTimer > 0) hurtTimer -= dt;
 		if (damageCooldown > 0) damageCooldown -= dt;
 
+		// --- Gun System Update ---
+		// Cooldowns
+		if (shootCooldown > 0) shootCooldown -= dt;
+		if (shootAnimTimer > 0) shootAnimTimer -= dt;
+		else isShooting = false;
+
+		// Reload
+		if (isReloading) {
+			reloadTimer -= dt;
+			if (reloadTimer <= 0) {
+				isReloading = false;
+				ammo = maxAmmo;
+			}
+		}
+
+		// Shooting input
+		if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !isReloading && shootCooldown <= 0 && ammo > 0) {
+			// Fire!
+			ammo--;
+			shootCooldown = shootCooldownMax;
+			isShooting = true;
+			shootAnimTimer = 0.1f;
+
+			// Spawn bullet
+			Vector3 forward = { cosf(pitch) * sinf(yaw), sinf(pitch), cosf(pitch) * cosf(yaw) };
+			Vector3 bulletStart = Vector3Add(camera.position, Vector3Scale(forward, 1.0f));
+			Vector3 bulletVel = Vector3Scale(forward, bulletSpeed);
+			bulletList.push_back(Bullet(bulletStart, bulletVel));
+
+			// Start reload if empty
+			if (ammo <= 0) {
+				isReloading = true;
+				reloadTimer = reloadTimeMax;
+			}
+		}
+
+		// Manual reload with R
+		if (IsKeyPressed(KEY_R) && !isReloading && ammo < maxAmmo) {
+			isReloading = true;
+			reloadTimer = reloadTimeMax;
+		}
+
+		// Update bullets
+		for (auto& bullet : bulletList) {
+			bullet.Update(dt);
+		}
+
+		// Remove inactive bullets
+		bulletList.erase(std::remove_if(bulletList.begin(), bulletList.end(),
+			[](const Bullet& b) { return !b.active; }), bulletList.end());
+
+		// Bullet-Enemy collision
+		for (auto& bullet : bulletList) {
+			if (!bullet.active) continue;
+			for (auto e : enemies) {
+				if (!e->active) continue;
+				if (CheckCollisionBoxes(bullet.GetBoundingBox(), e->GetBoundingBox())) {
+					e->TakeDamage(30.0f);
+					bullet.Deactivate();
+					break;
+				}
+			}
+		}
+
 		// Update Enemies
 		BoundingBox playerBox = GetPlayerBox(playerPos);
 		for (size_t i = 0; i < enemies.size(); i++) {
@@ -233,8 +329,8 @@ public:
 				}
 			}
 
-			// Enemy-Player Collision with cooldown
-			if (damageCooldown <= 0 && CheckCollisionBoxes(e->GetBoundingBox(), playerBox)) {
+			// Enemy-Player Collision with cooldown (only active enemies)
+			if (e->active && damageCooldown <= 0 && CheckCollisionBoxes(e->GetBoundingBox(), playerBox)) {
 				health -= 10;
 				hurtTimer = 0.25f; // 250ms red flash
 				damageCooldown = 1.0f; // 1 second cooldown
@@ -243,6 +339,26 @@ public:
 					health = 0;
 					currentState = DEATH_SCREEN;
 				}
+			}
+		}
+
+		// Remove dead enemies from the list
+		for (auto it = enemies.begin(); it != enemies.end(); ) {
+			if (!(*it)->active) {
+				delete *it;
+				it = enemies.erase(it);
+			} else {
+				++it;
+			}
+		}
+
+		// Remove dead enemies from the list
+		for (auto it = enemies.begin(); it != enemies.end(); ) {
+			if (!(*it)->active) {
+				delete *it;
+				it = enemies.erase(it);
+			} else {
+				++it;
 			}
 		}
 
@@ -379,10 +495,44 @@ public:
 		// Draw Enemies
 		for (auto e : enemies) e->Draw(camera, isShowingHitbox);
 
+		// Draw Bullets (glowing yellow spheres)
+		for (const auto& bullet : bulletList) {
+			if (bullet.active) {
+				DrawSphere(bullet.position, 0.15f, YELLOW);
+			}
+		}
+
+		// Draw Bullets
+		for (const auto& bullet : bulletList) {
+			if (bullet.active) {
+				DrawCube(bullet.position, 0.15f, 0.15f, 0.15f, YELLOW);
+			}
+		}
+
 		if (isShowingHitbox) {
 			DrawCubeWires(playerPos, playerSize.x, playerSize.y, playerSize.z, DARKPURPLE);
 		}
 		EndMode3D();
+
+		// Draw Gun (first-person, bottom-right)
+		Texture2D gunTex = isShooting ? gunTextureShooting : gunTextureStill;
+		int gunWidth = 500;
+		int gunHeight = 500;
+		int screenW = GetScreenWidth();
+		int screenH = GetScreenHeight();
+		Rectangle destRec = { (float)(screenW - gunWidth - 120), (float)(screenH - gunHeight + 150), (float)gunWidth, (float)gunHeight };
+		DrawTexturePro(gunTex,
+			{ 0, 0, (float)gunTex.width, (float)gunTex.height },
+			destRec,
+			{ 0, 0 }, 0.0f, WHITE);
+
+		// Draw Crosshair (center of screen)
+		int cx = GetScreenWidth() / 2;
+		int cy = GetScreenHeight() / 2;
+		int chSize = 10;
+		DrawLine(cx - chSize, cy, cx + chSize, cy, BLACK);
+		DrawLine(cx, cy - chSize, cx, cy + chSize, BLACK);
+		DrawCircleLines(cx, cy, chSize, BLACK);
 
 		// Hurt cam flash
 		if (hurtTimer > 0) {
@@ -410,11 +560,24 @@ public:
 		DrawText(TextFormat("Health: %d", health), 20, GetScreenHeight() - 80, 20, BLACK);
 		DrawText(isGrounded ? "Grounded" : "In Air", 20, GetScreenHeight() - 50, 15, isGrounded ? DARKGREEN : MAROON);
 
+		// UI - Ammo / Gun Status
+		DrawRectangle(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, Fade(DARKGRAY, 0.5f));
+		DrawRectangleLines(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, GRAY);
+		if (isReloading) {
+			float reloadPercent = 1.0f - (reloadTimer / reloadTimeMax);
+			DrawText("RELOADING...", GetScreenWidth() - 150, GetScreenHeight() - 45, 15, YELLOW);
+			// Reload progress bar
+			DrawRectangle(GetScreenWidth() - 150, GetScreenHeight() - 25, 130 * reloadPercent, 10, GREEN);
+		} else {
+			DrawText(TextFormat("Ammo: %d / %d", ammo, maxAmmo), GetScreenWidth() - 150, GetScreenHeight() - 45, 20, ammo > 0 ? WHITE : RED);
+		}
+
 		// UI - Instructions
-		DrawRectangle(10, 10, 250, 80, Fade(DARKGRAY, 0.3f));
+		DrawRectangle(10, 10, 280, 100, Fade(DARKGRAY, 0.3f));
 		DrawText("WASD to Move", 20, 20, 10, BLACK);
 		DrawText("SPACE to Jump", 20, 35, 10, BLACK);
-		DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 50, 10, BLACK);
+		DrawText("LMB: Shoot | R: Reload", 20, 50, 10, BLACK);
+		DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 65, 10, BLACK);
 		}
 
 		EndDrawing();
