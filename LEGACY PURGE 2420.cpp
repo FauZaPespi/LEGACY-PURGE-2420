@@ -8,7 +8,7 @@
 #include "Entities/PHPEmployee.h"
 #include "Entities/Bullet.h"
 
-enum GameState { PLAYING, DEATH_SCREEN };
+enum GameState { PLAYING, DEATH_SCREEN, PAUSE };
 
 class LegacyPurgeCore {
 private:
@@ -159,12 +159,20 @@ private:
 		EnableCursor();
 		DisableCursor();
 	}
+	void Option() {
+		currentState = PAUSE;
+		DisableCursor();
+		EnableCursor();
+
+	}
+
 
 public:
 	void Run() {
 		// Initialization
 		InitWindow(screenWidth, screenHeight, "LEGACY PURGE 2420");
 		SetTargetFPS(fps_objective);
+		SetExitKey(0);
 		DisableCursor();
 
 		// Set Fullscreen and Monitor Logic
@@ -237,9 +245,21 @@ public:
 			EnableCursor();
 			if (IsKeyPressed(KEY_R)) {
 				Restart();
+			}
+			return;
+		}
+		if (currentState == PAUSE) {
+			EnableCursor();
+			if (IsKeyPressed(KEY_C) || IsKeyPressed(KEY_ESCAPE)) {
 				currentState = PLAYING;
 				DisableCursor();
 			}
+			return;
+		}
+
+		if (IsKeyPressed(KEY_ESCAPE)) {
+			currentState = PAUSE;
+			EnableCursor();
 			return;
 		}
 
@@ -315,7 +335,7 @@ public:
 		for (size_t i = 0; i < enemies.size(); i++) {
 			PHPEmployee* e = enemies[i];
 			e->Update(dt, playerPos);
-			
+
 			// PHP vs PHP collision
 			for (size_t j = i + 1; j < enemies.size(); j++) {
 				e->HandleEntityCollision(enemies[j]);
@@ -345,19 +365,10 @@ public:
 		// Remove dead enemies from the list
 		for (auto it = enemies.begin(); it != enemies.end(); ) {
 			if (!(*it)->active) {
-				delete *it;
+				delete* it;
 				it = enemies.erase(it);
-			} else {
-				++it;
 			}
-		}
-
-		// Remove dead enemies from the list
-		for (auto it = enemies.begin(); it != enemies.end(); ) {
-			if (!(*it)->active) {
-				delete *it;
-				it = enemies.erase(it);
-			} else {
+			else {
 				++it;
 			}
 		}
@@ -541,7 +552,7 @@ public:
 
 		if (currentState == DEATH_SCREEN) {
 			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.8f));
-			
+
 			const char* deathText = "YOU HAVE BEEN PURGED";
 			int fontSize = 60;
 			int textWidth = MeasureText(deathText, fontSize);
@@ -552,32 +563,48 @@ public:
 			int subTextWidth = MeasureText(subText, subFontSize);
 			DrawText(subText, GetScreenWidth() / 2 - subTextWidth / 2, GetScreenHeight() / 2 + 20, subFontSize, RAYWHITE);
 		}
+		else if (currentState == PAUSE) {
+			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.8f));
+
+			const char* mainText = "PAUSED";
+			int fontSize = 60;
+			int textWidth = MeasureText(mainText, fontSize);
+			DrawText(mainText, GetScreenWidth() / 2 - textWidth / 2, GetScreenHeight() / 2 - 100, fontSize, WHITE);
+
+			const char* subText = "Press 'C' or 'ESC' to resume";
+			int subFontSize = 20;
+			int subTextWidth = MeasureText(subText, subFontSize);
+			DrawText(subText, GetScreenWidth() / 2 - subTextWidth / 2, GetScreenHeight() / 2 + 20, subFontSize, RAYWHITE);
+
+		}
 		else {
 			// UI - Player Stats
-		DrawRectangle(10, GetScreenHeight() - 110, 200, 100, Fade(SKYBLUE, 0.5f));
-		DrawRectangleLines(10, GetScreenHeight() - 110, 200, 100, BLUE);
-		DrawText("PLAYER STATUS", 20, GetScreenHeight() - 100, 10, DARKGRAY);
-		DrawText(TextFormat("Health: %d", health), 20, GetScreenHeight() - 80, 20, BLACK);
-		DrawText(isGrounded ? "Grounded" : "In Air", 20, GetScreenHeight() - 50, 15, isGrounded ? DARKGREEN : MAROON);
+			DrawRectangle(10, GetScreenHeight() - 110, 200, 100, Fade(SKYBLUE, 0.5f));
+			DrawRectangleLines(10, GetScreenHeight() - 110, 200, 100, BLUE);
+			DrawText("PLAYER STATUS", 20, GetScreenHeight() - 100, 10, DARKGRAY);
+			DrawText(TextFormat("Health: %d", health), 20, GetScreenHeight() - 80, 20, BLACK);
+			DrawText(isGrounded ? "Grounded" : "In Air", 20, GetScreenHeight() - 50, 15, isGrounded ? DARKGREEN : MAROON);
 
-		// UI - Ammo / Gun Status
-		DrawRectangle(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, Fade(DARKGRAY, 0.5f));
-		DrawRectangleLines(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, GRAY);
-		if (isReloading) {
-			float reloadPercent = 1.0f - (reloadTimer / reloadTimeMax);
-			DrawText("RELOADING...", GetScreenWidth() - 150, GetScreenHeight() - 45, 15, YELLOW);
-			// Reload progress bar
-			DrawRectangle(GetScreenWidth() - 150, GetScreenHeight() - 25, 130 * reloadPercent, 10, GREEN);
-		} else {
-			DrawText(TextFormat("Ammo: %d / %d", ammo, maxAmmo), GetScreenWidth() - 150, GetScreenHeight() - 45, 20, ammo > 0 ? WHITE : RED);
-		}
+			// UI - Ammo / Gun Status
+			DrawRectangle(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, Fade(DARKGRAY, 0.5f));
+			DrawRectangleLines(GetScreenWidth() - 160, GetScreenHeight() - 60, 150, 50, GRAY);
+			if (isReloading) {
+				float reloadPercent = 1.0f - (reloadTimer / reloadTimeMax);
+				DrawText("RELOADING...", GetScreenWidth() - 150, GetScreenHeight() - 45, 15, YELLOW);
+				// Reload progress bar
+				DrawRectangle(GetScreenWidth() - 150, GetScreenHeight() - 25, 130 * reloadPercent, 10, GREEN);
+			}
+			else {
+				DrawText(TextFormat("Ammo: %d / %d", ammo, maxAmmo), GetScreenWidth() - 150, GetScreenHeight() - 45, 20, ammo > 0 ? WHITE : RED);
+			}
 
-		// UI - Instructions
-		DrawRectangle(10, 10, 280, 100, Fade(DARKGRAY, 0.3f));
-		DrawText("WASD to Move", 20, 20, 10, BLACK);
-		DrawText("SPACE to Jump", 20, 35, 10, BLACK);
-		DrawText("LMB: Shoot | R: Reload", 20, 50, 10, BLACK);
-		DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 65, 10, BLACK);
+			// UI - Instructions
+			DrawRectangle(10, 10, 280, 115, Fade(DARKGRAY, 0.3f));
+			DrawText("WASD to Move", 20, 20, 10, BLACK);
+			DrawText("SPACE to Jump", 20, 35, 10, BLACK);
+			DrawText("LMB: Shoot | R: Reload", 20, 50, 10, BLACK);
+			DrawText("ESC: Pause", 20, 65, 10, BLACK);
+			DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 80, 10, BLACK);
 		}
 
 		EndDrawing();
