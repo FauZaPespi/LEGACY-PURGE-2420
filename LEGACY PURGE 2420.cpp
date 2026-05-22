@@ -7,8 +7,11 @@
 #include "raymath.h"
 #include "Entities/PHPEmployee.h"
 #include "Entities/Bullet.h"
+#include "Entities/LaravelBoss.h"
 
-enum GameState { PLAYING, DEATH_SCREEN, PAUSE };
+enum GameState { PLAYING, DEATH_SCREEN, PAUSE, TRANSITION };
+
+enum RoomType { MAZE_ROOM, BOSS_ROOM };
 
 class LegacyPurgeCore {
 private:
@@ -25,7 +28,9 @@ private:
 
 	// --- Entities ---
 	Texture2D phpTexture;
+	Texture2D bossTexture;
 	std::vector<PHPEmployee*> enemies;
+	LARAVELBoss* boss = nullptr;
 
 	// --- Physics & Movement ---
 	Vector3 playerPos = { 0.0f, 1.0f, 0.0f };
@@ -69,6 +74,12 @@ private:
 	bool isShowingHitbox = false;
 	const float cellSize = 3.0f;
 	const int mazeSize = 67; // Must be odd for the algorithm
+
+	// --- Boss Room Variables ---
+	RoomType currentRoom = MAZE_ROOM;
+	float transitionTimer = 0.0f;
+	int enemiesToClear = 0;
+	bool bossRoomDoorOpen = false;
 
 	BoundingBox GetPlayerBox(Vector3 pos) {
 		return {
@@ -139,16 +150,52 @@ private:
 		playerPos = { offset + 1 * cellSize, 1.0f, offset + 1 * cellSize };
 	}
 
+	void GenerateBossRoom() {
+		walls.clear();
+		bossRoomDoorOpen = true;
+
+		// Create arena floor with no walls, just a central boss platform
+		float offset = -50.0f; // Center at origin
+
+		// Add boss at center
+		if (boss == nullptr) {
+			boss = new LARAVELBoss({ 0.0f, 1.0f, 0.0f }, bossTexture, 4.0f);
+		}
+
+		// Add some decorative pillars at edges
+		for (int i = 0; i < 8; i++) {
+			float angle = (float)i * 3.14159f * 0.25f;
+			float dist = 40.0f;
+			Wall w;
+			w.pos = { cosf(angle) * dist, 15.0f, sinf(angle) * dist };
+			w.height = 30.0f;
+			w.color = { 50, 50, 80, 255 };
+			walls.push_back(w);
+		}
+
+		// Set player at arena entrance
+		playerPos = { 0.0f, 1.0f, 45.0f };
+	}
+
 	void Restart() {
 		health = 100;
 		currentState = PLAYING;
+		currentRoom = MAZE_ROOM;
+		bossRoomDoorOpen = false;
 		GenerateLabyrinth();
+
+		// Cleanup boss and boss bullets
+		if (boss != nullptr) {
+			delete boss;
+			boss = nullptr;
+		}
+
 		// Re-spawn enemies
 		for (auto e : enemies) delete e;
 		enemies.clear();
 		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
-		int enemyCount = (mazeSize * mazeSize) / 40;
-		for (int i = 0; i < enemyCount; i++) {
+		enemiesToClear = (mazeSize * mazeSize) / 40;
+		for (int i = 0; i < enemiesToClear; i++) {
 			Vector3 pos = {
 				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize,
 				1.5f,
@@ -156,16 +203,7 @@ private:
 			};
 			enemies.push_back(new PHPEmployee(pos, phpTexture, 2.0f));
 		}
-		EnableCursor();
-		DisableCursor();
 	}
-	void Option() {
-		currentState = PAUSE;
-		DisableCursor();
-		EnableCursor();
-
-	}
-
 
 public:
 	void Run() {
@@ -197,6 +235,15 @@ public:
 			UnloadImage(image);
 		}
 
+		// Load Boss Texture (Laravel)
+		bossTexture = LoadTexture("assets/laravel.png");
+		if (bossTexture.id == 0) {
+			// Fallback: Create a simple red texture if file not found
+			Image image = GenImageChecked(128, 128, 64, 64, RED, DARKBLUE);
+			bossTexture = LoadTextureFromImage(image);
+			UnloadImage(image);
+		}
+
 		// Load Gun Textures
 		gunTextureStill = LoadTexture("assets/gun_still.png");
 		if (gunTextureStill.id == 0) {
@@ -211,8 +258,8 @@ public:
 
 		// Initial Spawn
 		float offset = -(mazeSize * cellSize) / 1.0f + cellSize / 1.0f;
-		int enemyCount = (mazeSize * mazeSize) / 40;
-		for (int i = 0; i < enemyCount; i++) {
+		enemiesToClear = (mazeSize * mazeSize) / 40;
+		for (int i = 0; i < enemiesToClear; i++) {
 			Vector3 pos = {
 				offset + (float)GetRandomValue(1, mazeSize - 2) * cellSize,
 				1.5f,
@@ -228,12 +275,14 @@ public:
 
 		// Cleanup
 		UnloadTexture(phpTexture);
+		UnloadTexture(bossTexture);
 		UnloadTexture(gunTextureStill);
 		if (gunTextureShooting.id != gunTextureStill.id) {
 			UnloadTexture(gunTextureShooting);
 		}
 		for (auto e : enemies) delete e;
 		enemies.clear();
+		if (boss != nullptr) delete boss;
 
 		CloseWindow();
 	}
@@ -317,60 +366,113 @@ public:
 		bulletList.erase(std::remove_if(bulletList.begin(), bulletList.end(),
 			[](const Bullet& b) { return !b.active; }), bulletList.end());
 
-		// Bullet-Enemy collision
-		for (auto& bullet : bulletList) {
-			if (!bullet.active) continue;
-			for (auto e : enemies) {
-				if (!e->active) continue;
-				if (CheckCollisionBoxes(bullet.GetBoundingBox(), e->GetBoundingBox())) {
-					e->TakeDamage(30.0f);
-					bullet.Deactivate();
-					break;
+		// --- Boss Room Logic ---
+		if (currentRoom == BOSS_ROOM && boss != nullptr && boss->active) {
+			// Update Boss
+			boss->UpdateWithEnemies(dt, playerPos, enemies, bossRoomDoorOpen);
+
+			// Boss Bullet collision with player
+			if (bossRoomDoorOpen && CheckCollisionBoxes(boss->GetBoundingBox(), GetPlayerBox(playerPos))) {
+				if (damageCooldown <= 0) {
+					health -= 5; // Boss contact damage
+					hurtTimer = 0.25f;
+					damageCooldown = 1.0f;
 				}
+			}
+
+			// Boss death - win condition
+			if (!boss->active && bossRoomDoorOpen) {
+				// Boss defeated - game complete logic
+				currentState = TRANSITION;
+				transitionTimer = 2.0f;
 			}
 		}
 
-		// Update Enemies
-		BoundingBox playerBox = GetPlayerBox(playerPos);
-		for (size_t i = 0; i < enemies.size(); i++) {
-			PHPEmployee* e = enemies[i];
-			e->Update(dt, playerPos);
-
-			// PHP vs PHP collision
-			for (size_t j = i + 1; j < enemies.size(); j++) {
-				e->HandleEntityCollision(enemies[j]);
-			}
-
-			// Wall Collision for enemies
-			for (const auto& w : walls) {
-				// Optimization: only check walls within a certain distance
-				if (Vector3Distance(e->GetPosition(), w.pos) < cellSize * 2.0f) {
-					e->HandleWallCollision(w.pos, cellSize, w.height);
+		// --- Maze Room Logic ---
+		if (currentRoom == MAZE_ROOM) {
+			// Bullet-Enemy collision
+			for (auto& bullet : bulletList) {
+				if (!bullet.active) continue;
+				for (auto e : enemies) {
+					if (!e->active) continue;
+					if (CheckCollisionBoxes(bullet.GetBoundingBox(), e->GetBoundingBox())) {
+						e->TakeDamage(30.0f);
+						bullet.Deactivate();
+						break;
+					}
 				}
 			}
 
-			// Enemy-Player Collision with cooldown (only active enemies)
-			if (e->active && damageCooldown <= 0 && CheckCollisionBoxes(e->GetBoundingBox(), playerBox)) {
-				health -= 10;
-				hurtTimer = 0.25f; // 250ms red flash
-				damageCooldown = 1.0f; // 1 second cooldown
-				e->SetAttacking();
-				if (health <= 0) {
-					health = 0;
-					currentState = DEATH_SCREEN;
+			// Update Enemies
+			BoundingBox playerBox = GetPlayerBox(playerPos);
+			for (size_t i = 0; i < enemies.size(); i++) {
+				PHPEmployee* e = enemies[i];
+				e->Update(dt, playerPos);
+
+				// PHP vs PHP collision
+				for (size_t j = i + 1; j < enemies.size(); j++) {
+					e->HandleEntityCollision(enemies[j]);
 				}
+
+				// Wall Collision for enemies
+				for (const auto& w : walls) {
+					// Optimization: only check walls within a certain distance
+					if (Vector3Distance(e->GetPosition(), w.pos) < cellSize * 2.0f) {
+						e->HandleWallCollision(w.pos, cellSize, w.height);
+					}
+				}
+
+				// Enemy-Player Collision with cooldown (only active enemies)
+				if (e->active && damageCooldown <= 0 && CheckCollisionBoxes(e->GetBoundingBox(), playerBox)) {
+					health -= 10;
+					hurtTimer = 0.25f; // 250ms red flash
+					damageCooldown = 1.0f; // 1 second cooldown
+					e->SetAttacking();
+					if (health <= 0) {
+						health = 0;
+						currentState = DEATH_SCREEN;
+					}
+				}
+			}
+
+			// Remove dead enemies from the list
+			for (auto it = enemies.begin(); it != enemies.end(); ) {
+				if (!(*it)->active) {
+					delete* it;
+					it = enemies.erase(it);
+				}
+				else {
+					++it;
+				}
+			}
+
+			// Check if maze is cleared for boss transition
+			if (enemies.empty() && !bossRoomDoorOpen) {
+				currentState = TRANSITION;
+				transitionTimer = 3.0f;
 			}
 		}
 
-		// Remove dead enemies from the list
-		for (auto it = enemies.begin(); it != enemies.end(); ) {
-			if (!(*it)->active) {
-				delete* it;
-				it = enemies.erase(it);
+		// Transition handling
+		if (currentState == TRANSITION) {
+			transitionTimer -= dt;
+			if (transitionTimer <= 0) {
+				if (currentRoom == MAZE_ROOM && enemies.empty()) {
+					// Transition to boss room
+					currentRoom = BOSS_ROOM;
+					currentState = PLAYING;
+					GenerateBossRoom();
+					if (boss != nullptr) {
+						boss->StartBossFight();
+					}
+					// Heal player on room transition
+					health = 100;
+				}
+				else if (currentRoom == BOSS_ROOM && !bossRoomDoorOpen) {
+					currentState = PLAYING;
+				}
 			}
-			else {
-				++it;
-			}
+			return; // Skip normal update during transition
 		}
 
 		// 1. Toggle UI/Fullscreen
@@ -464,7 +566,7 @@ public:
 		}
 
 		// Wall Collision (Vertical - Landing on top or hitting from below)
-		playerBox = GetPlayerBox(playerPos);
+		BoundingBox playerBox = GetPlayerBox(playerPos);
 		for (const auto& w : walls) {
 			BoundingBox colBox = {
 				{ w.pos.x - cellSize / 2.0f, 0.0f, w.pos.z - cellSize / 2.0f },
@@ -495,25 +597,40 @@ public:
 		ClearBackground(RAYWHITE);
 
 		BeginMode3D(camera);
-		DrawPlane({ 0.0f, 0.0f, 0.0f }, { 128.0f, 128.0f }, LIGHTGRAY); // Larger floor for the maze
 
-		// Maze Walls
-		for (const auto& w : walls) {
-			DrawCube(w.pos, cellSize, w.height, cellSize, w.color);
-			DrawCubeWires(w.pos, cellSize, w.height, cellSize, Fade(BLACK, 0.3f));
+		// Draw floor
+		if (currentRoom == MAZE_ROOM) {
+			DrawPlane({ 0.0f, 0.0f, 0.0f }, { 128.0f, 128.0f }, LIGHTGRAY);
+			// Maze Walls
+			for (const auto& w : walls) {
+				DrawCube(w.pos, cellSize, w.height, cellSize, w.color);
+				DrawCubeWires(w.pos, cellSize, w.height, cellSize, Fade(BLACK, 0.3f));
+			}
+		}
+		else {
+			// Boss room floor
+			DrawPlane({ 0.0f, 0.0f, 0.0f }, { 200.0f, 200.0f }, DARKGRAY);
+			// Arena floor pattern
+			for (int i = 0; i < 20; i++) {
+				for (int j = 0; j < 20; j++) {
+					float x = (i - 10) * 10;
+					float z = (j - 10) * 10;
+					if ((i + j) % 2 == 0) {
+						DrawCube({ x, 0.05f, z }, 9.5f, 0.1f, 9.5f, Fade(DARKPURPLE, 0.2f));
+					}
+				}
+			}
+		}
+
+		// Draw Boss
+		if (boss != nullptr && boss->active) {
+			boss->Draw(camera, isShowingHitbox);
 		}
 
 		// Draw Enemies
 		for (auto e : enemies) e->Draw(camera, isShowingHitbox);
 
-		// Draw Bullets (glowing yellow spheres)
-		for (const auto& bullet : bulletList) {
-			if (bullet.active) {
-				DrawSphere(bullet.position, 0.15f, YELLOW);
-			}
-		}
-
-		// Draw Bullets
+		// Draw Bullets (player - yellow)
 		for (const auto& bullet : bulletList) {
 			if (bullet.active) {
 				DrawCube(bullet.position, 0.15f, 0.15f, 0.15f, YELLOW);
@@ -575,7 +692,27 @@ public:
 			int subFontSize = 20;
 			int subTextWidth = MeasureText(subText, subFontSize);
 			DrawText(subText, GetScreenWidth() / 2 - subTextWidth / 2, GetScreenHeight() / 2 + 20, subFontSize, RAYWHITE);
-
+		}
+		else if (currentState == TRANSITION) {
+			// Transition screen - Boss Door opening or ACCESS GRANTED
+			if (currentRoom == MAZE_ROOM) {
+				DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.5f));
+				const char* transitionText = "ACCESS GRANTED";
+				int fontSize = 70;
+				int textWidth = MeasureText(transitionText, fontSize);
+				DrawText(transitionText, GetScreenWidth() / 2 - textWidth / 2, GetScreenHeight() / 2 - 50, fontSize, GREEN);
+			}
+			else {
+				DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.8f));
+				const char* victoryText = "LARAVEL DEFEATED";
+				int fontSize = 60;
+				int textWidth = MeasureText(victoryText, fontSize);
+				DrawText(victoryText, GetScreenWidth() / 2 - textWidth / 2, GetScreenHeight() / 2 - 100, fontSize, GOLD);
+				const char* subText = "Press 'R' to Restart Legacy";
+				int subFontSize = 20;
+				int subTextWidth = MeasureText(subText, subFontSize);
+				DrawText(subText, GetScreenWidth() / 2 - subTextWidth / 2, GetScreenHeight() / 2 + 20, subFontSize, RAYWHITE);
+			}
 		}
 		else {
 			// UI - Player Stats
@@ -598,13 +735,39 @@ public:
 				DrawText(TextFormat("Ammo: %d / %d", ammo, maxAmmo), GetScreenWidth() - 150, GetScreenHeight() - 45, 20, ammo > 0 ? WHITE : RED);
 			}
 
+			// UI - Enemy Counter or Boss Health
+			if (currentRoom == MAZE_ROOM) {
+				DrawRectangle(10, 10, 250, 60, Fade(DARKGRAY, 0.3f));
+				DrawText(TextFormat("INSTANCES PHP: %d/%d", enemies.size(), enemiesToClear), 20, 20, 15, WHITE);
+			}
+			else if (boss != nullptr && boss->active) {
+				// Boss Health Bar
+				float healthPercent = boss->GetHealth() / boss->GetMaxHealth();
+				int barWidth = 400;
+				int barHeight = 20;
+				int barX = (GetScreenWidth() - barWidth) / 2;
+				int barY = 30;
+
+				DrawRectangle(barX, barY, barWidth, barHeight, RED); // Background
+				DrawRectangle(barX, barY, (int)(barWidth * healthPercent), barHeight, healthPercent > 0.3f ? GREEN : YELLOW); // Health fill
+				DrawRectangleLines(barX, barY, barWidth, barHeight, WHITE); // Border
+
+				DrawText("TARGET: LARAVEL", (GetScreenWidth() - MeasureText("TARGET: LARAVEL", 20)) / 2, 10, 20, WHITE);
+			}
+
 			// UI - Instructions
-			DrawRectangle(10, 10, 280, 115, Fade(DARKGRAY, 0.3f));
-			DrawText("WASD to Move", 20, 20, 10, BLACK);
-			DrawText("SPACE to Jump", 20, 35, 10, BLACK);
-			DrawText("LMB: Shoot | R: Reload", 20, 50, 10, BLACK);
-			DrawText("ESC: Pause", 20, 65, 10, BLACK);
-			DrawText("F10: Toggle Hitbox | F11: Fullscreen", 20, 80, 10, BLACK);
+			DrawRectangle(10, 80, 280, 90, Fade(DARKGRAY, 0.3f));
+			if (currentRoom == MAZE_ROOM) {
+				DrawText("WASD: Move | SPACE: Jump", 20, 90, 10, BLACK);
+				DrawText("LMB: Shoot | R: Reload", 20, 105, 10, BLACK);
+				DrawText("Clear PHP to access Boss Room", 20, 120, 10, YELLOW);
+			}
+			else {
+				DrawText("WASD: Move | SPACE: Jump", 20, 90, 10, BLACK);
+				DrawText("LMB: Shoot | R: Reload", 20, 105, 10, BLACK);
+				DrawText("Defeat LARAVEL to finish!", 20, 120, 10, RED);
+			}
+			DrawText("ESC: Pause", 20, 135, 10, BLACK);
 		}
 
 		EndDrawing();
